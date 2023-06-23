@@ -1,32 +1,31 @@
 import os
 import tensorflow as tf
-
-os.environ['TFHUB_MODEL_LOAD_FORMAT'] = 'COMPRESSED'
+import numpy as np
+import PIL.Image
+import time
 import IPython.display as display
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 
+os.environ['TFHUB_MODEL_LOAD_FORMAT'] = 'COMPRESSED'
+
 mpl.rcParams['figure.figsize'] = (12, 12)
 mpl.rcParams['axes.grid'] = False
-
-import numpy as np
-import PIL.Image
-import time
 
 content_path = "example.jpg"
 style_path = "style2.jpg"
 epochs = 10
 steps_per_epoch = 500
 
-
 tf.keras.backend.clear_session()
 
-#Restricting maximum VRAM available for tensorflow
+# Restricting maximum VRAM available for tensorflow
+# Just a precaution
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if gpus:
     try:
         tf.config.experimental.set_virtual_device_configuration(gpus[0], [
-            tf.config.experimental.VirtualDeviceConfiguration(memory_limit=2048)])
+            tf.config.experimental.VirtualDeviceConfiguration(memory_limit=5000)])
     except RuntimeError as e:
         print(e)
 
@@ -212,92 +211,86 @@ def train_step(image):
     image.assign(clip_0_1(image))
 
 
-train_step(image)
-train_step(image)
-train_step(image)
-tensor_to_image(image)
-
-
-def high_pass_x_y(image):
-  x_var = image[:, :, 1:, :] - image[:, :, :-1, :]
-  y_var = image[:, 1:, :, :] - image[:, :-1, :, :]
-
-  return x_var, y_var
-
-
-x_deltas, y_deltas = high_pass_x_y(content_image)
-
-plt.figure(figsize=(14, 10))
-plt.subplot(2, 2, 1)
-imshow(clip_0_1(2*y_deltas+0.5), "Horizontal Deltas: Original")
-
-plt.subplot(2, 2, 2)
-imshow(clip_0_1(2*x_deltas+0.5), "Vertical Deltas: Original")
-
-x_deltas, y_deltas = high_pass_x_y(image)
-
-plt.subplot(2, 2, 3)
-imshow(clip_0_1(2*y_deltas+0.5), "Horizontal Deltas: Styled")
-
-plt.subplot(2, 2, 4)
-imshow(clip_0_1(2*x_deltas+0.5), "Vertical Deltas: Styled")
-
-plt.figure(figsize=(14, 10))
-
-sobel = tf.image.sobel_edges(content_image)
-plt.subplot(1, 2, 1)
-imshow(clip_0_1(sobel[..., 0]/4+0.5), "Horizontal Sobel-edges")
-plt.subplot(1, 2, 2)
-imshow(clip_0_1(sobel[..., 1]/4+0.5), "Vertical Sobel-edges")
-
-
-def total_variation_loss(image):
-  x_deltas, y_deltas = high_pass_x_y(image)
-  return tf.reduce_sum(tf.abs(x_deltas)) + tf.reduce_sum(tf.abs(y_deltas))
-
-total_variation_loss(image).numpy()
-
+#
+# def high_pass_x_y(image):
+#     x_var = image[:, :, 1:, :] - image[:, :, :-1, :]
+#     y_var = image[:, 1:, :, :] - image[:, :-1, :, :]
+#     return x_var, y_var
+#
+#
+# x_deltas, y_deltas = high_pass_x_y(content_image)
+#
+# plt.figure(figsize=(14, 10))
+# plt.subplot(2, 2, 1)
+# imshow(clip_0_1(2 * y_deltas + 0.5), "Horizontal Deltas: Original")
+#
+# plt.subplot(2, 2, 2)
+# imshow(clip_0_1(2 * x_deltas + 0.5), "Vertical Deltas: Original")
+#
+# x_deltas, y_deltas = high_pass_x_y(image)
+#
+# plt.subplot(2, 2, 3)
+# imshow(clip_0_1(2 * y_deltas + 0.5), "Horizontal Deltas: Styled")
+#
+# plt.subplot(2, 2, 4)
+# imshow(clip_0_1(2 * x_deltas + 0.5), "Vertical Deltas: Styled")
+#
+# plt.figure(figsize=(14, 10))
+#
+# sobel = tf.image.sobel_edges(content_image)
+# plt.subplot(1, 2, 1)
+# imshow(clip_0_1(sobel[..., 0] / 4 + 0.5), "Horizontal Sobel-edges")
+# plt.subplot(1, 2, 2)
+# imshow(clip_0_1(sobel[..., 1] / 4 + 0.5), "Vertical Sobel-edges")
+# plt.show()
+#
+# def total_variation_loss(image):
+#     x_deltas, y_deltas = high_pass_x_y(image)
+#     return tf.reduce_sum(tf.abs(x_deltas)) + tf.reduce_sum(tf.abs(y_deltas))
+#
+#
+# total_variation_loss(image).numpy()
+#
 tf.image.total_variation(image).numpy()
 
-total_variation_weight=30
+total_variation_weight = 30
 
 
 @tf.function()
 def train_step(image):
-  with tf.GradientTape() as tape:
-    outputs = extractor(image)
-    loss = style_content_loss(outputs)
-    loss += total_variation_weight*tf.image.total_variation(image)
+    with tf.GradientTape() as tape:
+        outputs = extractor(image)
+        loss = style_content_loss(outputs)
+        loss += total_variation_weight * tf.image.total_variation(image)
 
-  grad = tape.gradient(loss, image)
-  opt.apply_gradients([(grad, image)])
-  image.assign(clip_0_1(image))
+    grad = tape.gradient(loss, image)
+    opt.apply_gradients([(grad, image)])
+    image.assign(clip_0_1(image))
 
-opt = tf.keras.optimizers.Adam(learning_rate=0.02, beta_1=0.99, epsilon=1e-1)
+
 image = tf.Variable(content_image)
 
 start = time.time()
 
 step = 0
 for n in range(epochs):
-  for m in range(steps_per_epoch):
-    step += 1
-    train_step(image)
-    print(".", end='', flush=True)
-  display.clear_output(wait=True)
-  display.display(tensor_to_image(image))
-  print("Train step: {}".format(step))
+    for m in range(steps_per_epoch):
+        step += 1
+        train_step(image)
+        print(".", end='', flush=True)
+    display.clear_output(wait=True)
+    display.display(tensor_to_image(image))
+    print("Train step: {}".format(step))
 
 end = time.time()
-print("Total time: {:.1f}".format(end-start))
+print("Total time: {:.1f}".format(end - start))
 
-
-file_name = 'stylized-image3.png'
+file_name = 'stylized-image4.png'
 tensor_to_image(image).save(file_name)
 
 try:
-  from google.colab import files
+    from google.colab import files
 except ImportError:
-   pass
+    pass
 else:
-  files.download(file_name)
+    files.download(file_name)
